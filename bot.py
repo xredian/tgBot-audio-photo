@@ -1,13 +1,13 @@
-from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters)
-from telegram.ext.callbackcontext import CallbackContext
-from telegram import (ReplyKeyboardMarkup)
+from collections import defaultdict
+from dotenv import load_dotenv
 import logging
+import os
+import psycopg2
 import subprocess
 import telegram
-import psycopg2
-import os
-from dotenv import load_dotenv
-from collections import defaultdict
+from telegram import ReplyKeyboardMarkup
+from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters)
+from telegram.ext.callbackcontext import CallbackContext
 
 
 load_dotenv()
@@ -16,13 +16,11 @@ load_dotenv()
 bot_token = os.getenv("TOKEN")
 bot = telegram.Bot(token=bot_token)
 
-
 # logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.DEBUG)
 
 logger = logging.getLogger(__name__)
-
 
 # proxy
 REQUEST_KWARGS = {
@@ -33,17 +31,24 @@ REQUEST_KWARGS = {
     }
 }
 
-
 # connection to db
 con = psycopg2.connect(
-        database="users_msgs",
-        user=os.getenv("DBUSER"),
-        password=os.getenv("DBPWD"),
-        host="localhost",
-        port="5432"
-    )
+    database="users_msgs",
+    user=os.getenv("DBUSER"),
+    password=os.getenv("DBPWD"),
+    host="localhost",
+    port="5432"
+)
 con.autocommit = True
 cur = con.cursor()
+
+print("Database opened successfully")
+try:
+    cur.execute("CREATE TABLE audio_messages (uid text, messages text PRIMARY KEY);")
+except:
+    print("I can't create a table!")
+
+con.commit()
 
 
 def start(update, context):
@@ -58,6 +63,8 @@ def help_reply(update, context):
         "Hey, you can add me to your group or chat to collect audio messages and photos with faces")
 
 
+'''
+# echo is needed to be used as a chat bot
 def echo(update, context):
     text = update.message.text
     if text == '/start':
@@ -68,6 +75,7 @@ def echo(update, context):
         update.message.reply_text("I don't understand you. Please write /start or "
                                   "/help.")
         logger.info(update)
+'''
 
 
 def error(update: Updater, context: CallbackContext):
@@ -75,28 +83,82 @@ def error(update: Updater, context: CallbackContext):
 
 
 audio_msgs = defaultdict()
+num = 0
+cur_dir = os.getcwd()
+user_id = ''
 
 
 def audio_messages(update, context):
+    """
+    Download voice messages from dialogs where bot is added
+    :param update: Updater
+    :param context: CallbackContext
+    :return: oga_to_wav() which convert .oga file to .wav file with a sampling rate of 16 kHz
+    """
     msg = update.message.voice
-    user_id = update.message.chat.username
-    if str(user_id) not in audio_msgs.keys():
+    global user_id
+    # user_id = update.message.from_user.username looks better with username, but the terms of reference says to use id
+    user_id = str(update.message.from_user.id)
+    print(user_id)
+    if user_id not in audio_msgs.keys():
         audio_msgs[user_id] = 0
     else:
         audio_msgs[user_id] += 1
     global num
     num = audio_msgs[user_id]
+    try:
+        new_dir = cur_dir + '/' + user_id
+        os.mkdir(new_dir)
+        os.chdir(new_dir)
+    except OSError:
+        new_dir = cur_dir + '/' + user_id
+        os.chdir(new_dir)
     voice = bot.get_file(msg.file_id).download(f'audio_message_{num}.oga')
-    return oga_to_wav(voice)
+    return oga_to_wav()
 
 
-def oga_to_wav(voice):
+uid_mes = defaultdict(list)
+
+
+def oga_to_wav():
+    """
+    Convert .oga file to .wav file with a sampling rate of 16 kHz
+    :return: db_rec() which make a record to DB
+    """
     src_filename = f'audio_message_{num}.oga'
     dest_filename = f'audio_message_{num}.wav'
+    uid_mes[user_id].append(dest_filename)
 
     process = subprocess.run(['ffmpeg', '-i', src_filename, '-ar', '16000', dest_filename])
     if process.returncode != 0:
         raise Exception("Something went wrong")
+    os.remove(src_filename)
+    os.chdir(cur_dir)
+    return db_rec()
+
+
+def db_rec():
+    """
+    Make a record to DB
+    :return: None
+    """
+    cur.execute("""
+    DO $$
+    BEGIN
+        LOOP
+            UPDATE audio_messages SET messages = %s WHERE uid = %s;
+            IF found THEN 
+                RETURN;
+                END IF;
+            BEGIN 
+                INSERT INTO audio_messages(uid, messages) VALUES (%s, %s);
+                RETURN;
+            EXCEPTION WHEN unique_violation THEN
+            END;
+        END LOOP;
+    END; 
+    $$
+    LANGUAGE plpgsql;""", (uid_mes[user_id], user_id, user_id, uid_mes[user_id]))
 
 
 def main():
@@ -104,7 +166,7 @@ def main():
     dp = updater.dispatcher
     dp.add_handler(CommandHandler('start', start))
     dp.add_handler(CommandHandler('help', help_reply))
-    dp.add_handler(MessageHandler(Filters.text, echo))
+    # dp.add_handler(MessageHandler(Filters.text, echo))
     dp.add_handler(MessageHandler(Filters.voice, audio_messages))
 
     # log all errors
