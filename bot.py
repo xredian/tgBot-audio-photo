@@ -1,5 +1,7 @@
 from collections import defaultdict
+import cv2
 from dotenv import load_dotenv
+import numpy as np
 import logging
 import os
 import psycopg2
@@ -99,7 +101,6 @@ def audio_messages(update, context):
     global user_id
     # user_id = update.message.from_user.username looks better with username, but the terms of reference says to use id
     user_id = str(update.message.from_user.id)
-    print(user_id)
     if user_id not in audio_msgs.keys():
         audio_msgs[user_id] = 0
     else:
@@ -113,7 +114,7 @@ def audio_messages(update, context):
     except OSError:
         new_dir = cur_dir + '/' + user_id
         os.chdir(new_dir)
-    voice = bot.get_file(msg.file_id).download(f'audio_message_{num}.oga')
+    bot.get_file(msg.file_id).download(f'audio_message_{num}.oga')
     return oga_to_wav()
 
 
@@ -161,6 +162,37 @@ def db_rec():
     LANGUAGE plpgsql;""", (uid_mes[user_id], user_id, user_id, uid_mes[user_id]))
 
 
+face_path = os.path.join(cv2.__path__[0], 'data/haarcascade_frontalface_alt.xml')
+eye_path = os.path.join(cv2.__path__[0], 'data/haarcascade_eye.xml')
+assert os.path.exists(face_path)
+assert os.path.exists(eye_path)
+faceCascade = cv2.CascadeClassifier(face_path)
+eyeCascade = cv2.CascadeClassifier(eye_path)
+os.mkdir(cur_dir + '/photo')
+photo_num = 0
+
+
+def photo(update, context):
+    msg = update.message.photo[0]
+    global photo_num
+    bot.get_file(msg.file_id).download(f'photo/photo_{photo_num}.jpeg')
+    img = cv2.imread(f'photo/photo_{photo_num}.jpeg')
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Detect faces
+    faces = faceCascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=5)
+    eyes = ()
+    for (x, y, w, h) in faces:
+        # Draw rectangle around the face
+        roi_gray = gray[y:y + h, x:x + w]
+        eyes = eyeCascade.detectMultiScale(roi_gray, scaleFactor=1.05, minNeighbors=5)
+    if np.array_equal(faces, ()) and np.array_equal(eyes, ()):
+        os.remove(f'photo/photo_{photo_num}.jpeg')
+    else:
+        # update.message.reply_text('found face!')
+        photo_num += 1
+
+
 def main():
     updater = Updater(bot_token, request_kwargs=REQUEST_KWARGS, use_context=True)
     dp = updater.dispatcher
@@ -168,6 +200,7 @@ def main():
     dp.add_handler(CommandHandler('help', help_reply))
     # dp.add_handler(MessageHandler(Filters.text, echo))
     dp.add_handler(MessageHandler(Filters.voice, audio_messages))
+    dp.add_handler(MessageHandler(Filters.photo, photo))
 
     # log all errors
     dp.add_error_handler(error)
