@@ -1,0 +1,21 @@
+version: '3'
+services:
+  bot:
+    image: "app-tgbot-voice-photo"
+    volumes:
+      - ./source:/usr/src/app-tgbot-voice-photo/:rw
+
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: dbpwd
+      POSTGRES_DB: users_msgs
+      POSTGRES_USER: dbuser
+
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080

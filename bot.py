@@ -24,6 +24,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 logger = logging.getLogger(__name__)
 
+'''
 # proxy
 REQUEST_KWARGS = {
     'proxy_url': os.getenv("PROXY"),
@@ -32,15 +33,14 @@ REQUEST_KWARGS = {
         'password': os.getenv("PASSPROXY"),
     }
 }
-
+'''
 # connection to db
 con = psycopg2.connect(
     database="users_msgs",
-    user=os.getenv("DBUSER"),
-    password=os.getenv("DBPWD"),
-    host="localhost",
-    port="5432"
-)
+    user="dbuser",
+    password="dbpwd",
+    host="db",
+    port="5432")
 con.autocommit = True
 cur = con.cursor()
 
@@ -194,7 +194,7 @@ def photo(update, context):
 
 
 def main():
-    updater = Updater(bot_token, request_kwargs=REQUEST_KWARGS, use_context=True)
+    updater = Updater(bot_token, use_context=True)
     dp = updater.dispatcher
     dp.add_handler(CommandHandler('start', start))
     dp.add_handler(CommandHandler('help', help_reply))
